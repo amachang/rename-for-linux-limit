@@ -23,9 +23,9 @@ impl Default for Config {
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[clap(long, default_value = "false")]
-    dry_run: bool,
-    path: Vec<PathBuf>,
+    #[clap(short = 's', long, default_value = "false")]
+    only_show_new_filename: bool,
+    path: PathBuf,
 }
 
 const N_FILENAME_BYTES: usize = 255;
@@ -38,6 +38,8 @@ enum Error {
     FileExtentionOver255Bytes(String),
     #[error("Config directory not found")]
     ConfigDirNotFound,
+    #[error("Filename not found in path: {0}")]
+    FilenameNotFound(PathBuf),
 }
 
 fn main() -> Result<()> {
@@ -51,20 +53,16 @@ fn main() -> Result<()> {
         (normalize_str(k), normalize_str(v))
     }).collect();
 
-    for path in args.path {
-        let filename = match path.file_name() {
-            Some(filename) => filename.to_string_lossy().to_string(),
-            None => {
-                eprintln!("Ignore, no filename: {}", path.display());
-                continue;
-            }
-        };
+    let path = args.path;
+    let filename = match path.file_name() {
+        Some(filename) => filename.to_string_lossy().to_string(),
+        None => return Err(Error::FilenameNotFound(path).into()),
+    };
 
-        let new_filename = new_filename(&filename, &ignored_tags, &tag_conversion_map)?;
-        if args.dry_run {
-            println!("Dry run: {} -> {}", filename, new_filename);
-            continue;
-        }
+    let new_filename = new_filename(&filename, &ignored_tags, &tag_conversion_map)?;
+    if args.only_show_new_filename {
+        println!("{}", new_filename);
+    } else {
         log::trace!("New filename: {}", new_filename);
         let new_path = path.with_file_name(&new_filename);
         match fs::rename(&path, &new_path) {
