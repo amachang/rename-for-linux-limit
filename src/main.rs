@@ -55,19 +55,29 @@ fn main() -> Result<()> {
 
     let path = args.path;
     let filename = match path.file_name() {
-        Some(filename) => filename.to_string_lossy().to_string(),
+        Some(filename) => filename,
         None => return Err(Error::FilenameNotFound(path).into()),
     };
 
-    let new_filename = new_filename(&filename, &ignored_tags, &tag_conversion_map)?;
-    if args.only_show_new_filename {
-        println!("{}", new_filename);
+    if filename.as_encoded_bytes().len() <= N_FILENAME_BYTES {
+        let filename = filename.to_string_lossy().to_string();
+        if args.only_show_new_filename {
+            println!("{}", filename);
+        } else {
+            log::info!("Filename is already short enough: {}", filename);
+        }
     } else {
-        log::trace!("New filename: {}", new_filename);
-        let new_path = path.with_file_name(&new_filename);
-        match fs::rename(&path, &new_path) {
-            Ok(_) => log::trace!("Renamed: {} -> {}", filename, new_filename),
-            Err(e) => return Err(Error::RenameError(path, new_path, e).into()),
+        let filename = filename.to_string_lossy();
+        let new_filename = new_filename(&filename, &ignored_tags, &tag_conversion_map)?;
+        if args.only_show_new_filename {
+            println!("{}", new_filename);
+        } else {
+            log::trace!("New filename: {}", new_filename);
+            let new_path = path.with_file_name(&new_filename);
+            match fs::rename(&path, &new_path) {
+                Ok(_) => log::info!("Renamed: {} -> {}", filename, new_filename),
+                Err(e) => return Err(Error::RenameError(path, new_path, e).into()),
+            };
         }
     }
     Ok(())
