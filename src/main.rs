@@ -1,4 +1,4 @@
-use std::{path::PathBuf, fs, io, collections::{HashSet, HashMap}};
+use std::{path::{Path, PathBuf}, fs, io, collections::{HashSet, HashMap}};
 use dirs::config_dir;
 use clap::{Parser, crate_name};
 use anyhow::Result;
@@ -25,6 +25,8 @@ impl Default for Config {
 struct Args {
     #[clap(short = 's', long, default_value = "false")]
     only_show_new_filename: bool,
+    #[clap(short = 'd', long, help = "If not set --dst-dir, the same as the given path's parent dir.")]
+    dst_dir: Option<PathBuf>,
     path: PathBuf,
 }
 
@@ -58,37 +60,57 @@ fn main() -> Result<()> {
         None => return Err(Error::FilenameNotFound(path).into()),
     };
 
+    let (dst_dir, to_same_dir) = if let Some(dst_dir) = args.dst_dir {
+        (dst_dir, false)
+    } else {
+        (path.parent().unwrap_or(Path::new(".")).to_path_buf(), true)
+    };
+
     if filename.as_encoded_bytes().len() <= N_FILENAME_BYTES {
         let filename = filename.to_string_lossy().to_string();
-        if args.only_show_new_filename {
-            println!("{}", filename);
-        } else {
-            log::info!("Filename is already short enough: {}", filename);
-        }
-    } else {
-        let filename = filename.to_string_lossy();
-        let mut n_retries = 0;
-        loop {
-            let new_filename = new_filename(&filename, &ignored_tags, &tag_conversion_map, n_retries);
+        if to_same_dir {
             if args.only_show_new_filename {
-                println!("{}", new_filename);
-                break;
+                println!("{}", filename);
             } else {
-                log::trace!("New filename: {}", new_filename);
-                let new_path = path.with_file_name(&new_filename);
-                if new_path.exists() {
-                    n_retries += 1;
-                    continue;
-                } else {
-                    match fs::rename(&path, &new_path) {
-                        Ok(_) => log::info!("Renamed: {} -> {}", filename, new_filename),
-                        Err(e) => return Err(Error::RenameError(path, new_path, e).into()),
-                    };
-                    break;
-                }
+                log::info!("Filename is already short enough: {}", filename);
             }
+            return Ok(());
+        }
+
+        let new_path = dst_dir.join(&filename);
+        if !new_path.exists() {
+            if args.only_show_new_filename {
+                println!("{}", filename);
+            } else {
+                rename_file(&path, &new_path)?;
+                log::info!("Just move (filename is short enough): {}", filename);
+            }
+            return Ok(());
         }
     }
+
+    let filename = filename.to_string_lossy();
+    let mut n_retries = 0;
+    loop {
+        let new_filename = new_filename(&filename, &ignored_tags, &tag_conversion_map, n_retries);
+        log::trace!("New filename candidate: {}", new_filename);
+
+        fs::create_dir_all(&dst_dir)?;
+        let new_path = dst_dir.join(&new_filename);
+
+        if !new_path.exists() {
+            if args.only_show_new_filename {
+                println!("{}", new_filename);
+            } else {
+                rename_file(&path, &new_path)?;
+                log::info!("Renamed: {} -> {}", filename, new_filename);
+            }
+            break;
+        }
+
+        n_retries += 1;
+    }
+
     Ok(())
 }
 
@@ -301,7 +323,7 @@ fn prepare_config() -> Result<Config> {
     if !config_path.exists() {
         let default_config = Config::default();
         let toml = toml::to_string_pretty(&default_config)?;
-        std::fs::write(&config_path, toml)?;
+        fs::write(&config_path, toml)?;
         log::debug!("Default config written to {:?}", config_path);
     }
     let config = config::Config::builder()
@@ -310,6 +332,30 @@ fn prepare_config() -> Result<Config> {
     let config = config.try_deserialize::<Config>()?;
 
     Ok(config)
+}
+
+fn rename_file(from_path: impl AsRef<Path>, to_path: impl AsRef<Path>) -> Result<()> {
+    let from_path = from_path.as_ref();
+    let to_path = to_path.as_ref();
+    match fs::rename(from_path, to_path) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            match e.raw_os_error() {
+                Some(libc::EXDEV) => {
+                    match fs::copy(from_path, to_path) {
+                        Ok(_) => (),
+                        Err(e) => return Err(Error::RenameError(from_path.to_path_buf(), to_path.to_path_buf(), e).into()),
+                    }
+                    match fs::remove_file(from_path) {
+                        Ok(_) => (),
+                        Err(e) => return Err(Error::RenameError(from_path.to_path_buf(), to_path.to_path_buf(), e).into()),
+                    }
+                    Ok(())
+                },
+                _ => Err(Error::RenameError(from_path.to_path_buf(), to_path.to_path_buf(), e).into()),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
