@@ -29,13 +29,12 @@ struct Args {
 }
 
 const N_FILENAME_BYTES: usize = 255;
+const N_MAX_EXTENSION_BYTES: usize = 5;
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
     #[error("Rename error: {0} -> {1}: {2}")]
     RenameError(PathBuf, PathBuf, io::Error),
-    #[error("File extention over 255 bytes: {0}")]
-    FileExtentionOver255Bytes(String),
     #[error("Config directory not found")]
     ConfigDirNotFound,
     #[error("Filename not found in path: {0}")]
@@ -68,41 +67,89 @@ fn main() -> Result<()> {
         }
     } else {
         let filename = filename.to_string_lossy();
-        let new_filename = new_filename(&filename, &ignored_tags, &tag_conversion_map)?;
-        if args.only_show_new_filename {
-            println!("{}", new_filename);
-        } else {
-            log::trace!("New filename: {}", new_filename);
-            let new_path = path.with_file_name(&new_filename);
-            match fs::rename(&path, &new_path) {
-                Ok(_) => log::info!("Renamed: {} -> {}", filename, new_filename),
-                Err(e) => return Err(Error::RenameError(path, new_path, e).into()),
-            };
+        let mut n_retries = 0;
+        loop {
+            let new_filename = new_filename(&filename, &ignored_tags, &tag_conversion_map, n_retries);
+            if args.only_show_new_filename {
+                println!("{}", new_filename);
+                break;
+            } else {
+                log::trace!("New filename: {}", new_filename);
+                let new_path = path.with_file_name(&new_filename);
+                if new_path.exists() {
+                    n_retries += 1;
+                    continue;
+                } else {
+                    match fs::rename(&path, &new_path) {
+                        Ok(_) => log::info!("Renamed: {} -> {}", filename, new_filename),
+                        Err(e) => return Err(Error::RenameError(path, new_path, e).into()),
+                    };
+                    break;
+                }
+            }
         }
     }
     Ok(())
 }
 
-fn new_filename(filename: impl AsRef<str>, ignored_tags: &HashSet<String>, tag_conversion_map: &HashMap<String, String>) -> Result<String> {
+fn new_filename(filename: impl AsRef<str>, ignored_tags: &HashSet<String>, tag_conversion_map: &HashMap<String, String>, n_retries: usize) -> String {
     let filename = filename.as_ref();
     assert!(!filename.is_empty());
 
     let mut split = filename.rsplitn(2, '.');
-    let (mut n_remaining_slug_bytes, slug, ext) = match (split.next(), split.next()) {
-        (Some(ext), Some(slug)) => {
-            let ext_len = ext.len() + 1;
-            if ext_len > N_FILENAME_BYTES {
-                return Err(Error::FileExtentionOver255Bytes(ext.to_string()).into());
-            }
-            let n_remaining_slug_bytes = N_FILENAME_BYTES.checked_sub(ext_len).expect("checked");
-            (n_remaining_slug_bytes, slug, format!(".{}", ext))
-        },
-        (None, None) => (N_FILENAME_BYTES, filename, "".to_string()),
-        _ => unreachable!(),
+    let ext = split.next().expect("first element is not empty");
+    let slug = split.next();
+    assert!(split.next().is_none());
+
+    let (ext, slug) = if let Some(slug) = slug {
+        if slug.is_empty() {
+            // in case filename starts with dot
+            (None, format!(".{}", ext))
+        } else {
+            (Some(ext), slug.to_string())
+        }
+    } else {
+        // in case no dot in filename
+        (None, ext.to_string())
     };
+
+    let (ext, slug) = if let Some(ext) = ext {
+        if ext.len() > N_MAX_EXTENSION_BYTES {
+            (None, format!("{}.{}", slug, ext))
+        } else {
+            (Some(ext), slug)
+        }
+    } else {
+        (None, slug)
+    };
+
+    let ext = if let Some(ext) = ext {
+        if n_retries == 0 {
+            Some(ext.to_string())
+        } else {
+            Some(format!("{}.{}", n_retries, ext))
+        }
+    } else {
+        if n_retries == 0 {
+            None
+        } else {
+            Some(format!("{}", n_retries))
+        }
+    };
+
+    let (mut n_remaining_slug_bytes, slug, ext) = if let Some(ext) = &ext {
+        let ext_len = ext.len() + 1;
+        assert!(ext_len <= usize::MAX.to_string().as_bytes().len() + N_MAX_EXTENSION_BYTES + 2);
+        assert!(ext_len <= N_FILENAME_BYTES);
+        let n_remaining_slug_bytes = N_FILENAME_BYTES.checked_sub(ext_len).expect("checked");
+        (n_remaining_slug_bytes, slug, format!(".{}", ext))
+    } else {
+        (N_FILENAME_BYTES, filename.to_string(), "".to_string())
+    };
+
     log::trace!("Remaining slug bytes (subtract extention): {}", n_remaining_slug_bytes);
 
-    let (first_component, remaining_components) = split_into_components(slug, tag_conversion_map);
+    let (first_component, remaining_components) = split_into_components(&slug, tag_conversion_map);
 
     let mut new_slug = String::new();
     if first_component.as_bytes().len() > n_remaining_slug_bytes {
@@ -175,7 +222,7 @@ fn new_filename(filename: impl AsRef<str>, ignored_tags: &HashSet<String>, tag_c
     let new_filename = format!("{}{}", new_slug, ext);
     log::trace!("New filename: ({1}) {0}", new_filename, new_filename.as_bytes().len());
     assert!(new_filename.as_bytes().len() <= N_FILENAME_BYTES);
-    return Ok(new_filename);
+    return new_filename;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -286,6 +333,19 @@ mod tests {
             SlugComponent { delimiter: '.', tag: "いいい".to_string() },
             SlugComponent { delimiter: '.', tag: "ううう".to_string() },
         ]));
+    }
+
+    #[test]
+    fn test_new_filename() {
+        let ignored_tags = HashSet::new();
+        let tag_conversion_map = HashMap::new();
+        assert_eq!(new_filename("a.b.c..d", &ignored_tags, &tag_conversion_map, 0), "a.b.c..d");
+        assert_eq!(new_filename("a.b.c..d", &ignored_tags, &tag_conversion_map, 1), "a.b.c..1.d");
+        assert_eq!(new_filename("一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五", &ignored_tags, &tag_conversion_map, 0), "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五");
+        assert_eq!(new_filename(".一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五", &ignored_tags, &tag_conversion_map, 0), ".一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四");
+        assert_eq!(new_filename("一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十", &ignored_tags, &tag_conversion_map, 0), "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五");
+        assert_eq!(new_filename("一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五", &ignored_tags, &tag_conversion_map, 1), "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四.1");
+        assert_eq!(new_filename(".一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五", &ignored_tags, &tag_conversion_map, 11), ".一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三.11");
     }
 }
 
