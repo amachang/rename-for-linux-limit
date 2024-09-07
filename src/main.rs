@@ -1,5 +1,4 @@
 use std::{path::{Path, PathBuf}, fs, io, collections::{HashSet, HashMap}};
-use dirs::config_dir;
 use clap::{Parser, crate_name};
 use anyhow::Result;
 use serde::{Serialize, Deserialize};
@@ -37,16 +36,15 @@ const N_MAX_EXTENSION_BYTES: usize = 5;
 enum Error {
     #[error("Rename error: {0} -> {1}: {2}")]
     RenameError(PathBuf, PathBuf, io::Error),
-    #[error("Config directory not found")]
-    ConfigDirNotFound,
     #[error("Filename not found in path: {0}")]
     FilenameNotFound(PathBuf),
 }
 
 fn main() -> Result<()> {
     env_logger::init();
+    jdt::use_from(crate_name!());
     let args = Args::parse();
-    let config = prepare_config()?;
+    let config = jdt::config::<Config>();
 
     // NFC normalization
     let ignored_tags = config.ignored_tags.iter().map(|s| normalize_str(s)).collect();
@@ -82,7 +80,7 @@ fn main() -> Result<()> {
             if args.only_show_new_filename {
                 println!("{}", filename);
             } else {
-                rename_file(&path, &new_path)?;
+                jdt::rename_file(&path, &new_path).map_err(|e| Error::RenameError(path.clone(), new_path, e))?;
                 log::info!("Just move (filename is short enough): {}", filename);
             }
             return Ok(());
@@ -102,7 +100,7 @@ fn main() -> Result<()> {
             if args.only_show_new_filename {
                 println!("{}", new_filename);
             } else {
-                rename_file(&path, &new_path)?;
+                jdt::rename_file(&path, &new_path).map_err(|e| Error::RenameError(path.clone(), new_path, e))?;
                 log::info!("Renamed: {} -> {}", filename, new_filename);
             }
             break;
@@ -312,50 +310,6 @@ fn split_into_components<'a>(slug: &'a str, tag_conversion_map: &HashMap<String,
 fn normalize_str(s: impl AsRef<str>) -> String {
     // NFD normalization for interportability
     s.as_ref().nfd().collect()
-}
-
-fn prepare_config() -> Result<Config> {
-    let config_parent_dir = config_dir().ok_or(Error::ConfigDirNotFound)?;
-    let config_dir = config_parent_dir.join(crate_name!());
-    fs::create_dir_all(&config_dir)?;
-
-    let config_path = config_dir.join("config.toml");
-    if !config_path.exists() {
-        let default_config = Config::default();
-        let toml = toml::to_string_pretty(&default_config)?;
-        fs::write(&config_path, toml)?;
-        log::debug!("Default config written to {:?}", config_path);
-    }
-    let config = config::Config::builder()
-        .add_source(config::File::from(config_path))
-        .build()?;
-    let config = config.try_deserialize::<Config>()?;
-
-    Ok(config)
-}
-
-fn rename_file(from_path: impl AsRef<Path>, to_path: impl AsRef<Path>) -> Result<()> {
-    let from_path = from_path.as_ref();
-    let to_path = to_path.as_ref();
-    match fs::rename(from_path, to_path) {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            match e.raw_os_error() {
-                Some(libc::EXDEV) => {
-                    match fs::copy(from_path, to_path) {
-                        Ok(_) => (),
-                        Err(e) => return Err(Error::RenameError(from_path.to_path_buf(), to_path.to_path_buf(), e).into()),
-                    }
-                    match fs::remove_file(from_path) {
-                        Ok(_) => (),
-                        Err(e) => return Err(Error::RenameError(from_path.to_path_buf(), to_path.to_path_buf(), e).into()),
-                    }
-                    Ok(())
-                },
-                _ => Err(Error::RenameError(from_path.to_path_buf(), to_path.to_path_buf(), e).into()),
-            }
-        }
-    }
 }
 
 #[cfg(test)]
