@@ -39,6 +39,9 @@ pub enum Action {
 ### 3. resolve_action Function (lib.rs)
 
 ```rust
+/// Maximum suffix attempts before giving up (prevents infinite loops)
+const MAX_SUFFIX_RETRIES: usize = 10000;
+
 /// Resolves what action to take for a source file being merged to destination.
 ///
 /// # Arguments
@@ -49,6 +52,14 @@ pub enum Action {
 /// # Returns
 /// Action enum indicating what operation to perform
 pub fn resolve_action(src: &Path, dst_dir: &Path, rel_path: &Path) -> Action {
+    // Skip symlinks (Sprint scope exclusion)
+    if src.symlink_metadata()
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Action::Skip;
+    }
+
     // Get parent directory and filename from rel_path
     let rel_parent = rel_path.parent().unwrap_or(Path::new(""));
     let filename = match rel_path.file_name() {
@@ -56,13 +67,8 @@ pub fn resolve_action(src: &Path, dst_dir: &Path, rel_path: &Path) -> Action {
         None => return Action::Error { message: "No filename in path".to_string() },
     };
 
-    // Build target directory
+    // Build target directory (no creation here - execute_action handles it)
     let target_dir = dst_dir.join(rel_parent);
-
-    // Create target directory (OK even in dry-run - only files matter)
-    if let Err(e) = fs::create_dir_all(&target_dir) {
-        return Action::Error { message: format!("Cannot create directory: {}", e) };
-    }
 
     // Load config once per invocation (consider caching at caller level)
     let config = jdt::project(crate_name!()).config::<Config>();
@@ -74,6 +80,13 @@ pub fn resolve_action(src: &Path, dst_dir: &Path, rel_path: &Path) -> Action {
     // Loop with increasing n_retries until resolution found
     let mut n_retries = 0;
     loop {
+        // Prevent infinite loop
+        if n_retries >= MAX_SUFFIX_RETRIES {
+            return Action::Error {
+                message: format!("Exceeded {} suffix attempts for {}", MAX_SUFFIX_RETRIES, filename)
+            };
+        }
+
         let candidate = new_candidate_filename(&filename, &ignored_tags, &tag_conversion_map, n_retries);
         let target = target_dir.join(&candidate);
 
@@ -82,7 +95,14 @@ pub fn resolve_action(src: &Path, dst_dir: &Path, rel_path: &Path) -> Action {
             return Action::Move { target };
         }
 
-        // Target exists - check if duplicate
+        // Target exists - check if it's a directory (file-vs-dir collision)
+        if target.is_dir() {
+            // Cannot overwrite directory with file - try next suffix
+            n_retries += 1;
+            continue;
+        }
+
+        // Target exists as file - check if duplicate
         match files_have_same_size(src, &target) {
             Ok(true) => {
                 // Same size - compare content
@@ -177,6 +197,8 @@ The `determine_file_status` function in the binary will be deleted - its logic i
    - `duplicate` file (target exists, same content) -> `Action::DeleteSrcOnly`
    - `conflict` file (target exists, different content) -> `Action::Move` with suffix
    - Long filename -> `Action::Move` with shortened name
+   - Symlink source -> `Action::Skip`
+   - File-vs-directory collision -> `Action::Move` with suffix
 
 2. **Build verification**:
    ```bash
@@ -197,6 +219,9 @@ The `determine_file_status` function in the binary will be deleted - its logic i
 
 ## Notes
 
-- The `Skip` action variant is kept for completeness but shouldn't occur in normal flow
+- The `Skip` action variant is used for symlinks (Sprint scope exclusion)
 - Error handling is minimal (log and continue) - comprehensive handling deferred to Phase 4
 - Config caching optimization deferred - jdt caches internally
+- `resolve_action` is side-effect free (read-only) - directory creation is in `execute_action`
+- MAX_SUFFIX_RETRIES (10000) prevents infinite loops on pathological collision patterns
+- File-vs-directory collision is treated as conflict (retry with suffix)

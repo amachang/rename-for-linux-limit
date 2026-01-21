@@ -15,7 +15,7 @@
 **NOT DOING**:
 - Comprehensive error handling (Phase 4)
 - Summary statistics output (Phase 4)
-- Symlink handling (Sprint scope exclusion)
+- Symlink handling (Sprint scope exclusion - symlinks are skipped via `Action::Skip`)
 - Permission/timestamp preservation (Sprint scope: best effort only)
 - In-memory dry-run collision tracking (edge case, defer)
 
