@@ -28,6 +28,74 @@ impl Default for Config {
 const N_FILENAME_BYTES: usize = 255;
 const N_MAX_EXTENSION_BYTES: usize = 5;
 
+/// macOS junk files (exact match, case-sensitive)
+const MACOS_JUNK_EXACT: &[&str] = &[
+    ".DS_Store",
+    ".DocumentRevisions-V100",
+    ".fseventsd",
+    ".Spotlight-V100",
+    ".TemporaryItems",
+    ".Trashes",
+    ".AppleDouble",
+    ".AppleDB",
+    ".AppleDesktop",
+    ".VolumeIcon.icns",
+    ".com.apple.timemachine.donotpresent",
+    ".apdisk",
+    "._", // AppleDouble stub (exact "._" without filename)
+];
+
+/// macOS junk prefix (AppleDouble resource forks)
+const MACOS_JUNK_PREFIX: &str = "._";
+
+/// Windows junk files (case-insensitive)
+const WINDOWS_JUNK: &[&str] = &[
+    "desktop.ini",
+    "thumbs.db",
+    "ehthumbs.db",
+    "$recycle.bin",
+];
+
+/// Linux junk files (exact match)
+const LINUX_JUNK: &[&str] = &["lost+found"];
+
+/// Checks if any component of the path matches known junk file patterns.
+///
+/// Checks all path components, not just the filename, to catch files
+/// nested under junk directories (e.g., `.Trashes/501/file.txt`).
+pub fn is_junk_path(path: &Path) -> bool {
+    for component in path.components() {
+        let name = match component {
+            std::path::Component::Normal(s) => s.to_string_lossy(),
+            _ => continue, // Skip RootDir, CurDir, ParentDir, Prefix
+        };
+
+        // macOS: exact match (case-sensitive)
+        if MACOS_JUNK_EXACT.contains(&name.as_ref()) {
+            return true;
+        }
+
+        // macOS: prefix match for AppleDouble files (._filename)
+        // Require length > prefix to avoid matching just "._" (handled by exact match)
+        if name.starts_with(MACOS_JUNK_PREFIX) && name.len() > MACOS_JUNK_PREFIX.len() {
+            return true;
+        }
+
+        // Windows: case-insensitive match
+        let name_lower = name.to_ascii_lowercase();
+        if WINDOWS_JUNK.contains(&name_lower.as_str()) {
+            return true;
+        }
+
+        // Linux: exact match
+        if LINUX_JUNK.contains(&name.as_ref()) {
+            return true;
+        }
+    }
+
+    false
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Filename not found in path: {0}")]
@@ -41,7 +109,7 @@ pub enum Action {
     Move { target: PathBuf },
     /// Delete src only - target already has identical content
     DeleteSrcOnly { target: PathBuf },
-    /// Skip this file (symlinks)
+    /// Skip this file (symlinks, junk files)
     Skip,
     /// Error occurred during resolution
     Error { message: String },
@@ -391,6 +459,11 @@ const MAX_SUFFIX_RETRIES: usize = 10000;
 /// # Returns
 /// Action enum indicating what operation to perform
 pub fn resolve_action(src: &Path, dst_dir: &Path, rel_path: &Path) -> Action {
+    // Skip junk files (OS metadata that causes permission errors)
+    if is_junk_path(rel_path) {
+        return Action::Skip;
+    }
+
     // Skip symlinks (Sprint scope exclusion)
     if src
         .symlink_metadata()
@@ -732,5 +805,45 @@ mod tests {
             hex::encode(hash),
             "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
         );
+    }
+
+    #[test]
+    fn test_macos_junk_exact() {
+        assert!(is_junk_path(Path::new(".DS_Store")));
+        assert!(is_junk_path(Path::new(".Trashes")));
+        assert!(is_junk_path(Path::new("subdir/.DS_Store")));
+        assert!(is_junk_path(Path::new(".Spotlight-V100/deeply/nested/file.txt")));
+    }
+
+    #[test]
+    fn test_macos_junk_prefix() {
+        assert!(is_junk_path(Path::new("._photo.jpg")));
+        assert!(is_junk_path(Path::new("subdir/._document.pdf")));
+        // Edge case: just "._" is also junk (in MACOS_JUNK_EXACT)
+        assert!(is_junk_path(Path::new("._")));
+    }
+
+    #[test]
+    fn test_windows_junk_case_insensitive() {
+        assert!(is_junk_path(Path::new("desktop.ini")));
+        assert!(is_junk_path(Path::new("DESKTOP.INI")));
+        assert!(is_junk_path(Path::new("Desktop.Ini")));
+        assert!(is_junk_path(Path::new("Thumbs.db")));
+        assert!(is_junk_path(Path::new("$RECYCLE.BIN")));
+        assert!(is_junk_path(Path::new("$Recycle.Bin/file.txt")));
+    }
+
+    #[test]
+    fn test_linux_junk() {
+        assert!(is_junk_path(Path::new("lost+found")));
+        assert!(is_junk_path(Path::new("lost+found/recovered_file")));
+    }
+
+    #[test]
+    fn test_not_junk() {
+        assert!(!is_junk_path(Path::new("normal_file.txt")));
+        assert!(!is_junk_path(Path::new("subdir/file.jpg")));
+        assert!(!is_junk_path(Path::new(".hidden_but_not_junk")));
+        assert!(!is_junk_path(Path::new("DS_Store"))); // Missing leading dot
     }
 }

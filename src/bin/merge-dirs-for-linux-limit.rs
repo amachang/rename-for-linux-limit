@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use rename_for_linux_limit::{execute_action, resolve_action};
+use rename_for_linux_limit::{execute_action, resolve_action, Action};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -16,6 +16,36 @@ struct Args {
     /// Show planned operations without executing
     #[arg(long)]
     dry_run: bool,
+}
+
+/// Statistics collected during merge operation
+#[derive(Default)]
+struct Stats {
+    moved: usize,
+    duplicates: usize,
+    skipped: usize,
+    errors: usize,
+}
+
+impl Stats {
+    fn total(&self) -> usize {
+        self.moved + self.duplicates + self.skipped + self.errors
+    }
+}
+
+fn print_summary(stats: &Stats, dry_run: bool) {
+    let prefix = if dry_run { "[dry-run] " } else { "" };
+
+    println!();
+    println!(
+        "{}Summary: {} moved, {} duplicates, {} skipped, {} errors ({} total)",
+        prefix,
+        stats.moved,
+        stats.duplicates,
+        stats.skipped,
+        stats.errors,
+        stats.total()
+    );
 }
 
 fn main() -> Result<()> {
@@ -36,6 +66,9 @@ fn main() -> Result<()> {
         args.dst
     };
 
+    // Track statistics
+    let mut stats = Stats::default();
+
     // Traverse source directory and execute operations
     jdt::walk_dir(&src, |file_path| {
         // Compute relative path from source root
@@ -46,16 +79,27 @@ fn main() -> Result<()> {
         // Resolve what action to take
         let action = resolve_action(&file_path, &dst, rel_path);
 
-        // Execute the action
-        if let Err(e) = execute_action(&action, &file_path, args.dry_run) {
-            log::error!(
-                "Failed to execute action for {}: {}",
-                file_path.display(),
-                e
-            );
-            // Continue with next file (fail-soft)
+        // Execute the action and update stats based on outcome
+        match execute_action(&action, &file_path, args.dry_run) {
+            Ok(()) => match &action {
+                Action::Move { .. } => stats.moved += 1,
+                Action::DeleteSrcOnly { .. } => stats.duplicates += 1,
+                Action::Skip => stats.skipped += 1,
+                Action::Error { .. } => stats.errors += 1,
+            },
+            Err(e) => {
+                log::error!(
+                    "Failed to execute action for {}: {}",
+                    file_path.display(),
+                    e
+                );
+                stats.errors += 1;
+            }
         }
     });
+
+    // Print summary
+    print_summary(&stats, args.dry_run);
 
     Ok(())
 }
