@@ -25,6 +25,7 @@ const MACOS_JUNK_EXACT: &[&str] = &[
     ".VolumeIcon.icns",
     ".com.apple.timemachine.donotpresent",
     ".apdisk",
+    "._", // AppleDouble stub (edge case: exact "._" without filename)
 ];
 
 /// macOS junk prefix (AppleDouble resource forks)
@@ -171,8 +172,8 @@ mod junk_tests {
     fn test_macos_junk_prefix() {
         assert!(is_junk_path(Path::new("._photo.jpg")));
         assert!(is_junk_path(Path::new("subdir/._document.pdf")));
-        // Edge case: just "._" should not match (no actual filename)
-        assert!(!is_junk_path(Path::new("._")));
+        // Edge case: just "._" is also junk (AppleDouble stub)
+        assert!(is_junk_path(Path::new("._")));
     }
 
     #[test]
