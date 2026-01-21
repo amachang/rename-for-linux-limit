@@ -34,6 +34,19 @@ pub enum Error {
     FilenameNotFound(PathBuf),
 }
 
+/// Action to perform for a source file during merge
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    /// Move src to target (target path includes shortened filename)
+    Move { target: PathBuf },
+    /// Delete src only - target already has identical content
+    DeleteSrcOnly { target: PathBuf },
+    /// Skip this file (symlinks)
+    Skip,
+    /// Error occurred during resolution
+    Error { message: String },
+}
+
 pub fn new_filename(path: impl AsRef<Path>, dst_dir: Option<impl AsRef<Path>>) -> Result<String> {
     new_filename_impl(path, dst_dir, |p| p.exists())
 }
@@ -104,7 +117,7 @@ fn new_filename_impl(
     }
 }
 
-fn new_candidate_filename(
+pub fn new_candidate_filename(
     filename: impl AsRef<str>,
     ignored_tags: &HashSet<String>,
     tag_conversion_map: &HashMap<String, String>,
@@ -363,6 +376,119 @@ fn compute_sha256(path: &Path) -> io::Result<[u8; 32]> {
     let mut hasher = Sha256::new();
     io::copy(&mut reader, &mut hasher)?;
     Ok(hasher.finalize().into())
+}
+
+/// Maximum suffix attempts before giving up (prevents infinite loops)
+const MAX_SUFFIX_RETRIES: usize = 10000;
+
+/// Resolves what action to take for a source file being merged to destination.
+///
+/// # Arguments
+/// * `src` - Absolute path to source file
+/// * `dst_dir` - Absolute path to destination directory root
+/// * `rel_path` - Relative path from src root (preserves directory structure)
+///
+/// # Returns
+/// Action enum indicating what operation to perform
+pub fn resolve_action(src: &Path, dst_dir: &Path, rel_path: &Path) -> Action {
+    // Skip symlinks (Sprint scope exclusion)
+    if src
+        .symlink_metadata()
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Action::Skip;
+    }
+
+    // Get parent directory and filename from rel_path
+    let rel_parent = rel_path.parent().unwrap_or(Path::new(""));
+    let filename = match rel_path.file_name() {
+        Some(f) => f.to_string_lossy().to_string(),
+        None => {
+            return Action::Error {
+                message: "No filename in path".to_string(),
+            }
+        }
+    };
+
+    // Build target directory (no creation here - execute_action handles it)
+    let target_dir = dst_dir.join(rel_parent);
+
+    // Load config once per invocation (jdt caches internally)
+    let config = jdt::project(crate_name!()).config::<Config>();
+    let ignored_tags: HashSet<String> = config
+        .ignored_tags
+        .iter()
+        .map(|s| normalize_str(s))
+        .collect();
+    let tag_conversion_map: HashMap<String, String> = config
+        .conversions
+        .iter()
+        .map(|(k, v)| (normalize_str(k), normalize_str(v)))
+        .collect();
+
+    // Loop with increasing n_retries until resolution found
+    let mut n_retries = 0;
+    loop {
+        // Prevent infinite loop
+        if n_retries >= MAX_SUFFIX_RETRIES {
+            return Action::Error {
+                message: format!(
+                    "Exceeded {} suffix attempts for {}",
+                    MAX_SUFFIX_RETRIES, filename
+                ),
+            };
+        }
+
+        let candidate =
+            new_candidate_filename(&filename, &ignored_tags, &tag_conversion_map, n_retries);
+        let target = target_dir.join(&candidate);
+
+        if !target.exists() {
+            // Target doesn't exist - move is safe
+            return Action::Move { target };
+        }
+
+        // Target exists - check if it's a directory (file-vs-dir collision)
+        if target.is_dir() {
+            // Cannot overwrite directory with file - try next suffix
+            n_retries += 1;
+            continue;
+        }
+
+        // Target exists as file - check if duplicate
+        match files_have_same_size(src, &target) {
+            Ok(true) => {
+                // Same size - compare content
+                match files_have_same_content(src, &target) {
+                    Ok(true) => {
+                        // Identical content - delete src only
+                        return Action::DeleteSrcOnly { target };
+                    }
+                    Ok(false) => {
+                        // Different content - try next suffix
+                        n_retries += 1;
+                        continue;
+                    }
+                    Err(e) => {
+                        return Action::Error {
+                            message: format!("Hash error: {}", e),
+                        };
+                    }
+                }
+            }
+            Ok(false) => {
+                // Different size - conflict, try next suffix
+                n_retries += 1;
+                continue;
+            }
+            Err(e) => {
+                return Action::Error {
+                    message: format!("Size check error: {}", e),
+                };
+            }
+        }
+    }
 }
 
 #[cfg(test)]
