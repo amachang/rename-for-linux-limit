@@ -31,31 +31,67 @@
 - Add `sha2` crate for SHA256 hashing
 - Size-first comparison for performance (hash only when sizes match)
 - This is a personal migration tool, not production service
+- **MUST use streaming hash** - archives may include large files (50GB+)
 
-## Technical Context
+## Research Synthesis
 
-### Dependencies
-- Add `sha2` crate for SHA256 hashing
+### Accepted (from multi-agent research)
+- **Streaming hash**: Essential for handling large archive files (Gemini/Codex agreed)
+- **Function location**: lib.rs (all agreed)
+- **Size-first comparison**: Standard practice (all agreed)
+- **sha2 crate**: Version 0.10, use `io::copy` or read loop pattern
 
-### Phase 1 Foundation (Already Implemented)
-- CLI with `<src>`, `<dst>`, `--dry-run` arguments
-- Directory traversal using `jdt::walk_dir`
-- Relative path computation from source root
-
-### Key Files
-- `src/bin/merge-dirs-for-linux-limit.rs` - CLI binary (51 lines from Phase 1)
-- `src/lib.rs` - Core library (new_filename logic for Phase 3)
+### Deferred (all agreed)
+- Hash caching (single pass tool)
+- Parallel hashing (Phase 4 if needed)
+- mmap (unnecessary complexity)
+- Complex conflict resolution (Phase 3)
 
 ## STEPs
 
-- [ ] STEP 1: Add sha2 dependency and implement comparison functions
-- [ ] STEP 2: Integrate comparison into CLI and output results
+- [ ] STEP 1: Add sha2 dependency and implement streaming comparison functions in lib.rs
+- [ ] STEP 2: Integrate comparison into CLI and output results with status labels
 - [ ] Initial review with multiple agents
 - [ ] Apply review feedback (iteration 1)
 - [ ] Second review with multiple agents
 - [ ] Apply review feedback if needed (iteration 2)
 - [ ] Final validation
 
+## Technical Details
+
+### Dependencies to Add
+```toml
+sha2 = "0.10"
+```
+
+### Function Signatures (lib.rs)
+```rust
+pub fn files_have_same_size(src: &Path, dst: &Path) -> io::Result<bool>
+pub fn files_have_same_content(src: &Path, dst: &Path) -> io::Result<bool>
+```
+
+### Streaming Hash Pattern
+```rust
+use sha2::{Sha256, Digest};
+use std::io::{self, BufReader, Read};
+
+fn compute_sha256(path: &Path) -> io::Result<[u8; 32]> {
+    let file = fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    io::copy(&mut reader, &mut hasher)?;
+    Ok(hasher.finalize().into())
+}
+```
+
+### CLI Output Format
+```
+[new] /src/path/file.txt -> /dst/path/file.txt
+[duplicate] /src/path/same.txt -> /dst/path/same.txt
+[conflict (size)] /src/path/diff.txt -> /dst/path/diff.txt
+[conflict (content)] /src/path/diff2.txt -> /dst/path/diff2.txt
+```
+
 ## Status
 
-**Current**: Planning (Dry Coding)
+**Current**: Stage 4 - IMPROVE PLAN complete, proceeding to EXECUTE (Dry Coding)
