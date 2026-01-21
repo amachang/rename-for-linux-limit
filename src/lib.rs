@@ -496,6 +496,69 @@ pub fn resolve_action(src: &Path, dst_dir: &Path, rel_path: &Path) -> Action {
     }
 }
 
+/// Executes the resolved action for a file.
+///
+/// # Arguments
+/// * `action` - The action to perform
+/// * `src` - Absolute path to source file
+/// * `dry_run` - If true, only print what would be done
+///
+/// # Returns
+/// Result indicating success or failure
+pub fn execute_action(action: &Action, src: &Path, dry_run: bool) -> Result<()> {
+    match action {
+        Action::Move { target } => execute_move(src, target, dry_run),
+        Action::DeleteSrcOnly { target } => execute_delete_src(src, target, dry_run),
+        Action::Skip => {
+            // Silent skip for symlinks/directories
+            Ok(())
+        }
+        Action::Error { message } => {
+            println!("[error] {}: {}", src.display(), message);
+            Ok(()) // Continue processing other files
+        }
+    }
+}
+
+fn execute_move(src: &Path, target: &Path, dry_run: bool) -> Result<()> {
+    if dry_run {
+        println!("[move] {} -> {}", src.display(), target.display());
+        return Ok(());
+    }
+
+    // Create parent directories
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    // Use jdt::rename_file for cross-filesystem support (handles EXDEV)
+    jdt::rename_file(src, target)?;
+
+    println!("[move] {} -> {}", src.display(), target.display());
+    Ok(())
+}
+
+fn execute_delete_src(src: &Path, target: &Path, dry_run: bool) -> Result<()> {
+    if dry_run {
+        println!(
+            "[delete-src] {} -> {} (duplicate)",
+            src.display(),
+            target.display()
+        );
+        return Ok(());
+    }
+
+    // Delete source file (target already has identical content)
+    fs::remove_file(src)?;
+
+    println!(
+        "[delete-src] {} -> {} (duplicate)",
+        src.display(),
+        target.display()
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
