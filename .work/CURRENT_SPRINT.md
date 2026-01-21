@@ -211,6 +211,19 @@ Reuse `new_filename()` from lib.rs for shortening. Use `jdt::rename_file` for cr
 - Identical files: source deleted, destination unchanged
 - Source files are deleted after successful move
 
+**Status**: ✅ Complete
+
+#### Phase 3 Completion Notes
+
+- **Custom duplicate detection**: `new_filename_impl` doesn't check content equivalence - implemented custom loop in `resolve_action` with size+hash comparison before deciding action
+- **Action enum design**: Replaced string status labels with typed `Action` enum (`Move`, `DeleteSrcOnly`, `Skip`, `Error`) for downstream execution clarity
+- **resolve/execute separation**: `resolve_action` is pure/read-only, `execute_action` has side effects - enables clean dry-run without special casing
+- **Fail-soft approach**: Using `Action::Error` variant and continuing to next file rather than aborting - appropriate for batch migration tool
+- **Directory collision guard**: Added `src.is_dir()` check in `resolve_action` to prevent file-vs-directory conflicts
+- **Symlink handling**: Explicit `Action::Skip` for symlinks (Sprint scope exclusion) via `symlink_metadata()` check
+- **Infinite loop prevention**: `MAX_SUFFIX_RETRIES = 10000` caps suffix attempts on pathological collision patterns
+- **For Phase 4**: Error output goes to stderr (`eprintln!`), consider summary statistics for moved/deleted/skipped counts
+
 ---
 
 ### Phase 4: Error Handling + Polish
