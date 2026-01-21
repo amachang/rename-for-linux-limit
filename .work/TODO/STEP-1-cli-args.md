@@ -46,7 +46,9 @@ fn main() -> Result<()> {
 
     // Validate src exists and is directory
     let src = args.src.canonicalize()?;
-    assert!(src.is_dir(), "Source must be a directory: {}", src.display());
+    if !src.is_dir() {
+        anyhow::bail!("Source must be a directory: {}", src.display());
+    }
 
     // Canonicalize dst only if it exists, otherwise use as-is
     let dst = if args.dst.exists() {
@@ -72,7 +74,7 @@ fn main() -> Result<()> {
 
 4. **Conditional canonicalize for dst**: Destination may not exist yet. Use as-is if non-existent.
 
-5. **Assert for directory check**: Using assert per CODING_CONVENTIONS - this is a programmer/user error, not a runtime condition. The tool cannot function with a non-directory source.
+5. **User input validation with bail**: User providing a non-directory is user error, not programmer error. Per CODING_CONVENTIONS, assertions are for programmer bugs only. User input errors use `if/else` with proper error handling (`anyhow::bail!`).
 
 6. **No custom error types**: Following YAGNI - Phase 4 will polish error handling. For now, anyhow's automatic context is sufficient.
 
@@ -115,7 +117,7 @@ fn main() -> Result<()> {
    ```bash
    ./target/release/merge-dirs-for-linux-limit /etc/passwd /tmp
    ```
-   Should fail with assertion
+   Should fail with error message
 
 ## Notes
 

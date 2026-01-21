@@ -41,7 +41,9 @@ fn main() -> Result<()> {
 
     // Validate src exists and is directory
     let src = args.src.canonicalize()?;
-    assert!(src.is_dir(), "Source must be a directory: {}", src.display());
+    if !src.is_dir() {
+        anyhow::bail!("Source must be a directory: {}", src.display());
+    }
 
     // Canonicalize dst only if it exists, otherwise use as-is
     let dst = if args.dst.exists() {
@@ -149,3 +151,5 @@ Output:
 - Symlinks are followed by `walk_dir` (deferred to Phase 3 for filtering)
 - Empty directories are not listed (walk_dir returns files only)
 - The `--dry-run` flag is accepted but all operations are already dry-run in Phase 1
+- **Relative dst path handling**: If dst doesn't exist and is specified as a relative path, output will show relative target paths. This is acceptable for Phase 1 dry-run preview.
+  - Example: `./target/release/merge-dirs-for-linux-limit /tmp/src relative-dst --dry-run` will output `/tmp/src/file.txt -> relative-dst/file.txt`
