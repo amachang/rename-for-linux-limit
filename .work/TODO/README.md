@@ -62,13 +62,15 @@ pub fn walk_dir<R>(dir: impl AsRef<Path>, f: impl FnMut(PathBuf) -> R) -> Vec<R>
 
 ## STEPs
 
-- [ ] STEP 1: Create CLI binary with argument parsing and validation [dry-coded]
-- [ ] STEP 2: Implement directory traversal with relative path computation and output [dry-coded]
+- [x] STEP 1: Create CLI binary with argument parsing and validation [implemented]
+- [x] STEP 2: Implement directory traversal with relative path computation and output [implemented]
 
 See `STEP-1-cli-args.md` and `STEP-2-traversal-output.md` for detailed implementation plans.
 
-## Review Status
+## Implementation Status
 
-- [x] Initial review completed
+- [x] Initial Dry Coding review completed
 - [x] Review feedback applied (assert -> bail!, dst path clarification)
-- [x] Final verification completed
+- [x] Final Dry Coding verification completed
+- [x] STEP 1+2 implemented and reviewed
+- [ ] Human review and phase completion confirmation
