@@ -244,6 +244,17 @@ Handle permission errors gracefully (log and continue). Provide clear operation 
 - Dry-run output accurately predicts actual behavior
 - All operations are logged at appropriate verbosity levels
 
+**Status**: ✅ Complete
+
+#### Phase 4 Completion Notes
+
+- **Implemented**: Junk file detection (`is_junk_path`) in lib.rs; Summary statistics (`Stats` struct, `print_summary`) in bin
+- **Key pattern**: `is_junk_path(rel_path)` - uses relative path to avoid false positives from absolute path components like `/Users/.Trashes_backup/`
+- **Case sensitivity**: macOS junk exact match (case-sensitive), Windows case-insensitive, Linux exact match
+- **Stats timing**: Count action types AFTER `execute_action()` returns to reflect actual outcomes (not planned outcomes) - discovered during review
+- **Dry-run difference**: Skip lines appear in dry-run preview but not actual execution (intentional design - skips are non-events during execution)
+- **STEP 3 outcome**: Verification-only, no code changes needed - existing behavior already consistent
+
 ---
 
 ## Technical Notes
