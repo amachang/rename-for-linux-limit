@@ -1,6 +1,6 @@
-use std::{path::PathBuf, fs, io};
-use clap::Parser;
 use anyhow::Result;
+use clap::Parser;
+use std::{fs, io, path::PathBuf};
 
 use rename_for_linux_limit::new_filename;
 
@@ -8,7 +8,11 @@ use rename_for_linux_limit::new_filename;
 struct Args {
     #[clap(short = 's', long, default_value = "false")]
     only_show_new_filename: bool,
-    #[clap(short = 'd', long, help = "If not set --dst-dir, the same as the given path's parent dir.")]
+    #[clap(
+        short = 'd',
+        long,
+        help = "If not set --dst-dir, the same as the given path's parent dir."
+    )]
     dst_dir: Option<PathBuf>,
     path: PathBuf,
 }
@@ -31,9 +35,13 @@ fn main() -> Result<()> {
     let dst_dir = args.dst_dir;
     let only_show_new_filename = args.only_show_new_filename;
 
-    let new_filename = new_filename(&path, dst_dir.as_ref()).map_err(|e| match e.downcast::<rename_for_linux_limit::Error>() {
-        Ok(rename_for_linux_limit::Error::FilenameNotFound(path)) => Error::FilenameNotFound(path),
-        Err(e) => Error::UnknownError(e),
+    let new_filename = new_filename(&path, dst_dir.as_ref()).map_err(|e| {
+        match e.downcast::<rename_for_linux_limit::Error>() {
+            Ok(rename_for_linux_limit::Error::FilenameNotFound(path)) => {
+                Error::FilenameNotFound(path)
+            }
+            Err(e) => Error::UnknownError(e),
+        }
     })?;
 
     if only_show_new_filename {
@@ -57,4 +65,3 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-

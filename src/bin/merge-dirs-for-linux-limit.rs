@@ -1,7 +1,7 @@
-use std::path::{Path, PathBuf};
-use clap::Parser;
 use anyhow::Result;
-use rename_for_linux_limit::{files_have_same_size, files_have_same_content};
+use clap::Parser;
+use rename_for_linux_limit::{files_have_same_content, files_have_same_size};
+use std::path::{Path, PathBuf};
 
 #[derive(Parser, Debug)]
 #[command(name = "merge-dirs-for-linux-limit")]
@@ -39,7 +39,9 @@ fn main() -> Result<()> {
     // Traverse source directory and print planned operations
     jdt::walk_dir(&src, |file_path| {
         // Compute relative path from source root
-        let rel_path = file_path.strip_prefix(&src).expect("file must be under src");
+        let rel_path = file_path
+            .strip_prefix(&src)
+            .expect("file must be under src");
 
         // Compute target path
         let target_path = dst.join(rel_path);
@@ -48,7 +50,12 @@ fn main() -> Result<()> {
         let status = determine_file_status(&file_path, &target_path);
 
         // Output planned operation with status
-        println!("[{}] {} -> {}", status, file_path.display(), target_path.display());
+        println!(
+            "[{}] {} -> {}",
+            status,
+            file_path.display(),
+            target_path.display()
+        );
     });
 
     Ok(())
@@ -67,14 +74,24 @@ fn determine_file_status(src: &Path, dst: &Path) -> &'static str {
                 Ok(true) => "duplicate",
                 Ok(false) => "conflict (content)",
                 Err(e) => {
-                    log::warn!("Hash comparison failed: {} vs {}: {}", src.display(), dst.display(), e);
+                    log::warn!(
+                        "Hash comparison failed: {} vs {}: {}",
+                        src.display(),
+                        dst.display(),
+                        e
+                    );
                     "error"
                 }
             }
         }
         Ok(false) => "conflict (size)",
         Err(e) => {
-            log::warn!("Size comparison failed: {} vs {}: {}", src.display(), dst.display(), e);
+            log::warn!(
+                "Size comparison failed: {} vs {}: {}",
+                src.display(),
+                dst.display(),
+                e
+            );
             "error"
         }
     }
