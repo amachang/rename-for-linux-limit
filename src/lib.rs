@@ -400,6 +400,11 @@ pub fn resolve_action(src: &Path, dst_dir: &Path, rel_path: &Path) -> Action {
         return Action::Skip;
     }
 
+    // Skip directories (handle only files)
+    if src.is_dir() {
+        return Action::Skip;
+    }
+
     // Get parent directory and filename from rel_path
     let rel_parent = rel_path.parent().unwrap_or(Path::new(""));
     let filename = match rel_path.file_name() {
@@ -419,7 +424,7 @@ pub fn resolve_action(src: &Path, dst_dir: &Path, rel_path: &Path) -> Action {
     let ignored_tags: HashSet<String> = config
         .ignored_tags
         .iter()
-        .map(|s| normalize_str(s))
+        .map(normalize_str)
         .collect();
     let tag_conversion_map: HashMap<String, String> = config
         .conversions
