@@ -42,23 +42,26 @@ This phase adds two main capabilities:
 
 ## STEPs
 
-- [ ] STEP 1: Add junk path detection and skip logic
+- [x] STEP 1: Add junk path detection and skip logic
   - **Design**: `STEP-1-junk-path-detection.md`
   - Add `is_junk_path(path: &Path) -> bool` in lib.rs
   - Check path components (not just filename) to skip files under junk directories
   - Call at start of `resolve_action()`, return `Action::Skip` for junk
   - Case sensitivity: macOS exact match, Windows case-insensitive
 
-- [ ] STEP 2: Add summary statistics collection and output
+- [x] STEP 2: Add summary statistics collection and output
   - **Design**: `STEP-2-summary-statistics.md`
   - Track counts: moved, duplicates, skipped (combined), errors
   - Modify main loop to collect stats from action results
   - Print summary at end (both dry-run and actual execution)
+  - **Review fix**: Stats updated after execution to reflect actual outcomes
 
-- [ ] STEP 3: Verify dry-run consistency (may be N/A)
+- [x] STEP 3: Verify dry-run consistency (N/A - no code changes needed)
   - **Design**: `STEP-3-verify-dryrun.md`
-  - Confirm dry-run output matches actual execution behavior
-  - Ensure summary is printed in both modes
+  - Confirmed dry-run output matches actual execution behavior
+  - Summary is printed in both modes
+
+- [ ] Human review and confirmation
 
 ## Technical Notes
 
