@@ -33,22 +33,37 @@
 
 ### Existing Code to Reference
 - `src/main.rs`: Current single-file CLI using clap derive
-- `src/lib.rs`: `new_filename()` function (not used in Phase 1, but Phase 3 will integrate)
+- `src/lib.rs`: `new_filename()` function (NOT used in Phase 1 - has side effects)
 
-### jdt Library Functions
-- `jdt::walk_dir`: Recursive directory traversal
-- `jdt::rename_file`: Cross-filesystem move (EXDEV-aware) - NOT used in Phase 1
+### jdt Library Functions (Research Findings)
+
+**jdt::walk_dir API**:
+```rust
+pub fn walk_dir<R>(dir: impl AsRef<Path>, f: impl FnMut(PathBuf) -> R) -> Vec<R>
+```
+- Returns **files only** (directories are traversed but not returned)
+- Gracefully skips errors with logging (continues on permission errors)
+- Uses `path.is_dir()` which follows symlinks (defer handling to Phase 3)
+- Stack-based non-recursive implementation (safe for deep directories)
 
 ### Key Decisions
 - **Binary location**: `src/bin/merge-dirs-for-linux-limit.rs` (standard Cargo bin layout)
 - **Argument structure**: `<src> <dst> --dry-run` (positional args + flag)
-- **Output format**: Simple text listing of files to be processed
+- **Output format**: Simple text - `{src_path} -> {dst_path}`
+- **Path handling**: Use `canonicalize()` for reliable `strip_prefix`
+- **Validation**: Check src exists and is directory before traversal
+
+### Deferred to Later Phases
+- Symlink detection/skipping (Phase 3)
+- `new_filename()` integration (Phase 3) - has `fs::create_dir_all` side effect
+- JSON/structured output format
+- Progress reporting
+- Detailed error types
 
 ## STEPs
 
-- [ ] STEP 1: Create CLI binary with argument parsing
-- [ ] STEP 2: Implement directory traversal and relative path computation
-- [ ] STEP 3: Add dry-run output formatting
+- [ ] STEP 1: Create CLI binary with argument parsing and validation
+- [ ] STEP 2: Implement directory traversal with relative path computation and output
 
 ## Review Status
 
