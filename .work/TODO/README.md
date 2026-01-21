@@ -42,15 +42,26 @@ This phase adds two main capabilities:
 
 ## STEPs
 
-- [ ] STEP 1: Add junk file detection and skip logic
+- [ ] STEP 1: Add junk path detection and skip logic
+  - Add `is_junk_path(path: &Path) -> bool` in lib.rs
+  - Check path components (not just filename) to skip files under junk directories
+  - Call at start of `resolve_action()`, return `Action::Skip` for junk
+  - Case sensitivity: macOS exact match, Windows case-insensitive
+
 - [ ] STEP 2: Add summary statistics collection and output
-- [ ] STEP 3: Review and verify dry-run consistency
+  - Track counts: moved, duplicates, skipped (combined), errors
+  - Modify main loop to collect stats from action results
+  - Print summary at end (both dry-run and actual execution)
+
+- [ ] STEP 3: Verify dry-run consistency (may be N/A)
+  - Confirm dry-run output matches actual execution behavior
+  - Ensure summary is printed in both modes
 
 ## Technical Notes
 
 ### Junk Files to Skip
 
-**macOS**:
+**macOS** (exact match, case-sensitive):
 - `.DS_Store` - Finder metadata
 - `.DocumentRevisions-V100` - Document versioning
 - `.fseventsd` - File system events
@@ -60,23 +71,43 @@ This phase adds two main capabilities:
 - `.AppleDouble` - Resource forks
 - `.AppleDB` - Apple database
 - `.AppleDesktop` - Desktop database
-- `._*` - AppleDouble files (resource fork prefix)
+- `.VolumeIcon.icns` - Volume icon
+- `.com.apple.timemachine.donotpresent` - Time Machine marker
+- `.apdisk` - Network share marker
+- `._*` - AppleDouble files (prefix pattern, `starts_with`)
 
-**Windows**:
+**Windows** (case-insensitive):
 - `desktop.ini` - Folder settings
 - `Thumbs.db` - Thumbnail cache
 - `ehthumbs.db` - Video thumbnails
 - `$RECYCLE.BIN` - Recycle bin
 
-**Linux**:
+**Linux** (exact match):
 - `lost+found` - fsck recovery directory
+
+### Research Findings Summary
+
+**Accepted**:
+- Check path components (not just filename) to catch files under junk directories
+- macOS names: case-sensitive exact match
+- Windows names: case-insensitive match
+- Place junk check at start of `resolve_action()` for consistency with symlink skip
+
+**Rejected**:
+- Replace `jdt::walk_dir` with `walkdir` crate (Sprint constraint to use jdt)
+- Root-only scope for volume dirs (overcomplicates, low false positive risk for use case)
+- New `Action::Skip { reason }` variant (track stats in main loop instead)
+- Configurable patterns (YAGNI)
 
 ### Implementation Approach
 
-1. Add `is_junk_file()` function in lib.rs
-2. Call before `resolve_action()` or integrate into it
-3. Use `Action::Skip` with reason for junk files (or new variant)
-4. Collect statistics during walk, print summary at end
+1. Add `is_junk_path(path: &Path) -> bool` in lib.rs
+   - Check each path component against junk list
+   - Early return true if any component matches
+2. Call at start of `resolve_action()` before symlink check
+3. Reuse existing `Action::Skip` (no new variant)
+4. In main loop: track action counts, print summary at end
+5. Summary format: `Moved: X, Duplicates: Y, Skipped: Z, Errors: W`
 
 ### Cross-Device Support
 Confirmed: `jdt::rename_file` handles EXDEV (cross-filesystem) via copy+delete internally. No changes needed.
