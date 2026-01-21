@@ -79,21 +79,22 @@ fn main() -> Result<()> {
         // Resolve what action to take
         let action = resolve_action(&file_path, &dst, rel_path);
 
-        // Update stats based on action type
-        match &action {
-            Action::Move { .. } => stats.moved += 1,
-            Action::DeleteSrcOnly { .. } => stats.duplicates += 1,
-            Action::Skip => stats.skipped += 1,
-            Action::Error { .. } => stats.errors += 1,
-        }
-
-        // Execute the action
-        if let Err(e) = execute_action(&action, &file_path, args.dry_run) {
-            log::error!(
-                "Failed to execute action for {}: {}",
-                file_path.display(),
-                e
-            );
+        // Execute the action and update stats based on outcome
+        match execute_action(&action, &file_path, args.dry_run) {
+            Ok(()) => match &action {
+                Action::Move { .. } => stats.moved += 1,
+                Action::DeleteSrcOnly { .. } => stats.duplicates += 1,
+                Action::Skip => stats.skipped += 1,
+                Action::Error { .. } => stats.errors += 1,
+            },
+            Err(e) => {
+                log::error!(
+                    "Failed to execute action for {}: {}",
+                    file_path.display(),
+                    e
+                );
+                stats.errors += 1;
+            }
         }
     });
 
