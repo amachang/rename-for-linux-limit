@@ -510,11 +510,13 @@ pub fn execute_action(action: &Action, src: &Path, dry_run: bool) -> Result<()> 
         Action::Move { target } => execute_move(src, target, dry_run),
         Action::DeleteSrcOnly { target } => execute_delete_src(src, target, dry_run),
         Action::Skip => {
-            // Silent skip for symlinks/directories
+            if dry_run {
+                println!("[skip] {}", src.display());
+            }
             Ok(())
         }
         Action::Error { message } => {
-            println!("[error] {}: {}", src.display(), message);
+            eprintln!("[error] {}: {}", src.display(), message);
             Ok(()) // Continue processing other files
         }
     }
