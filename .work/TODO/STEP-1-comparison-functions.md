@@ -65,7 +65,6 @@ Add inside `#[cfg(test)] mod tests`:
 ```rust
 #[test]
 fn test_files_have_same_size() {
-    use std::io::Write;
     let dir = tempfile::tempdir().unwrap();
 
     let file1 = dir.path().join("file1.txt");
