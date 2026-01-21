@@ -62,8 +62,10 @@ pub fn walk_dir<R>(dir: impl AsRef<Path>, f: impl FnMut(PathBuf) -> R) -> Vec<R>
 
 ## STEPs
 
-- [ ] STEP 1: Create CLI binary with argument parsing and validation
-- [ ] STEP 2: Implement directory traversal with relative path computation and output
+- [ ] STEP 1: Create CLI binary with argument parsing and validation [dry-coded]
+- [ ] STEP 2: Implement directory traversal with relative path computation and output [dry-coded]
+
+See `STEP-1-cli-args.md` and `STEP-2-traversal-output.md` for detailed implementation plans.
 
 ## Review Status
 
