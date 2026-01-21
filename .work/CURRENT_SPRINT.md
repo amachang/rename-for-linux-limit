@@ -149,6 +149,16 @@ Create new binary at `src/bin/merge-dirs-for-linux-limit.rs`. Use clap for argum
 - Relative paths are correctly computed
 - No files are modified in dry-run mode
 
+**Status**: ✅ Complete
+
+#### Phase 1 Completion Notes
+
+- **Implemented**: `src/bin/merge-dirs-for-linux-limit.rs` (51 lines)
+- **Key pattern**: `canonicalize()` for src (required for reliable `strip_prefix`), conditional for dst (may not exist yet)
+- **`jdt::walk_dir`** returns files only (directories traversed but not yielded) - relevant for Phase 2+ output formatting
+- **`--dry-run` flag** parsed but unused in Phase 1 - establishes interface for Phase 3
+- **Deferred**: Symlink filtering (Phase 3), `new_filename()` integration (Phase 3)
+
 ---
 
 ### Phase 2: Content Comparison (Size + Hash)
