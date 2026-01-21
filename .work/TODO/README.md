@@ -50,7 +50,9 @@
 ## STEPs
 
 - [ ] STEP 1: Add sha2 dependency and implement streaming comparison functions in lib.rs
+  - Dry Coding: `.work/TODO/STEP-1-comparison-functions.md`
 - [ ] STEP 2: Integrate comparison into CLI and output results with status labels
+  - Dry Coding: `.work/TODO/STEP-2-cli-integration.md`
 - [ ] Initial review with multiple agents
 - [ ] Apply review feedback (iteration 1)
 - [ ] Second review with multiple agents
@@ -94,4 +96,4 @@ fn compute_sha256(path: &Path) -> io::Result<[u8; 32]> {
 
 ## Status
 
-**Current**: Stage 4 - IMPROVE PLAN complete, proceeding to EXECUTE (Dry Coding)
+**Current**: Dry Coding complete. STEP-1 and STEP-2 design documents created, ready for review.
