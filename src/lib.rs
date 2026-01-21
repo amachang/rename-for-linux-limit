@@ -1,7 +1,13 @@
-use std::{path::{Path, PathBuf}, fs, collections::{HashSet, HashMap}};
-use clap::crate_name;
 use anyhow::Result;
-use serde::{Serialize, Deserialize};
+use clap::crate_name;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::io;
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::{Path, PathBuf},
+};
 use unicode_normalization::UnicodeNormalization;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -33,25 +39,33 @@ pub fn new_filename(path: impl AsRef<Path>, dst_dir: Option<impl AsRef<Path>>) -
 }
 
 // dependency injection for testing
-fn new_filename_impl(path: impl AsRef<Path>, dst_dir: Option<impl AsRef<Path>>, mut check_file_existence: impl FnMut(&Path) -> bool) -> Result<String> {
+fn new_filename_impl(
+    path: impl AsRef<Path>,
+    dst_dir: Option<impl AsRef<Path>>,
+    mut check_file_existence: impl FnMut(&Path) -> bool,
+) -> Result<String> {
     let path = path.as_ref();
     let dst_dir = dst_dir.map(|p| p.as_ref().to_path_buf());
 
     let config = jdt::project(crate_name!()).config::<Config>();
 
     // NFC normalization
-    let ignored_tags = config.ignored_tags.iter().map(|s| normalize_str(s)).collect();
-    let tag_conversion_map = config.conversions.iter().map(|(k, v)| {
-        (normalize_str(k), normalize_str(v))
-    }).collect();
+    let ignored_tags = config
+        .ignored_tags
+        .iter()
+        .map(|s| normalize_str(s))
+        .collect();
+    let tag_conversion_map = config
+        .conversions
+        .iter()
+        .map(|(k, v)| (normalize_str(k), normalize_str(v)))
+        .collect();
 
     let filename = match path.file_name() {
-        Some(filename) => {
-            filename
-        },
+        Some(filename) => filename,
         None => {
             return Err(Error::FilenameNotFound(path.to_path_buf()).into());
-        },
+        }
     };
 
     let (dst_dir, to_same_dir) = if let Some(dst_dir) = dst_dir {
@@ -75,7 +89,8 @@ fn new_filename_impl(path: impl AsRef<Path>, dst_dir: Option<impl AsRef<Path>>, 
     let filename = filename.to_string_lossy();
     let mut n_retries = 0;
     loop {
-        let new_candidate_filename = new_candidate_filename(&filename, &ignored_tags, &tag_conversion_map, n_retries);
+        let new_candidate_filename =
+            new_candidate_filename(&filename, &ignored_tags, &tag_conversion_map, n_retries);
         log::trace!("New candidate filename: {}", new_candidate_filename);
 
         fs::create_dir_all(&dst_dir)?;
@@ -89,7 +104,12 @@ fn new_filename_impl(path: impl AsRef<Path>, dst_dir: Option<impl AsRef<Path>>, 
     }
 }
 
-fn new_candidate_filename(filename: impl AsRef<str>, ignored_tags: &HashSet<String>, tag_conversion_map: &HashMap<String, String>, n_retries: usize) -> String {
+fn new_candidate_filename(
+    filename: impl AsRef<str>,
+    ignored_tags: &HashSet<String>,
+    tag_conversion_map: &HashMap<String, String>,
+    n_retries: usize,
+) -> String {
     let filename = filename.as_ref();
     assert!(!filename.is_empty());
 
@@ -144,7 +164,10 @@ fn new_candidate_filename(filename: impl AsRef<str>, ignored_tags: &HashSet<Stri
         (N_FILENAME_BYTES, filename.to_string(), "".to_string())
     };
 
-    log::trace!("Remaining slug bytes (subtract extention): {}", n_remaining_slug_bytes);
+    log::trace!(
+        "Remaining slug bytes (subtract extention): {}",
+        n_remaining_slug_bytes
+    );
 
     let (first_component, remaining_components) = split_into_components(&slug, tag_conversion_map);
 
@@ -162,10 +185,14 @@ fn new_candidate_filename(filename: impl AsRef<str>, ignored_tags: &HashSet<Stri
         new_slug.push_str(first_component);
 
         // (len, index)
-        let mut len_indecies = remaining_components.iter().enumerate().map(|(i, c)| {
-            let len = c.n_bytes();
-            (len, i)
-        }).collect::<Vec<_>>();
+        let mut len_indecies = remaining_components
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let len = c.n_bytes();
+                (len, i)
+            })
+            .collect::<Vec<_>>();
 
         // shorter components prefered
         len_indecies.sort_by(|(len1, _), (len2, _)| len1.cmp(len2));
@@ -212,12 +239,20 @@ fn new_candidate_filename(filename: impl AsRef<str>, ignored_tags: &HashSet<Stri
 
         for component in converted_components {
             new_slug.push_str(&component);
-            log::trace!("New slug pushed ({1}) {0}", new_slug, new_slug.as_bytes().len());
+            log::trace!(
+                "New slug pushed ({1}) {0}",
+                new_slug,
+                new_slug.as_bytes().len()
+            );
         }
     }
 
     let new_filename = format!("{}{}", new_slug, ext);
-    log::trace!("New filename: ({1}) {0}", new_filename, new_filename.as_bytes().len());
+    log::trace!(
+        "New filename: ({1}) {0}",
+        new_filename,
+        new_filename.as_bytes().len()
+    );
     assert!(new_filename.as_bytes().len() <= N_FILENAME_BYTES);
     return new_filename;
 }
@@ -242,7 +277,10 @@ impl std::fmt::Display for SlugComponent {
 
 const DELIMITERS: [char; 1] = ['.'];
 
-fn split_into_components<'a>(slug: &'a str, tag_conversion_map: &HashMap<String, String>) -> (&'a str, Vec<SlugComponent>) {
+fn split_into_components<'a>(
+    slug: &'a str,
+    tag_conversion_map: &HashMap<String, String>,
+) -> (&'a str, Vec<SlugComponent>) {
     assert!(!slug.is_empty());
     let mut components = Vec::new();
 
@@ -264,22 +302,36 @@ fn split_into_components<'a>(slug: &'a str, tag_conversion_map: &HashMap<String,
 
     while let Some((i, c)) = char_indices.next() {
         if DELIMITERS.contains(&c) {
-            let tag = &slug[start + c.len_utf8() .. i];
-            components.push(SlugComponent { delimiter: c, tag: tag.to_string() });
+            let tag = &slug[start + c.len_utf8()..i];
+            components.push(SlugComponent {
+                delimiter: c,
+                tag: tag.to_string(),
+            });
             start = i;
         }
     }
     if start < slug.len() {
         let c = slug[start..].chars().next().expect("checked");
         let tag = &slug[start + c.len_utf8()..];
-        components.push(SlugComponent { delimiter: c, tag: tag.to_string() });
+        components.push(SlugComponent {
+            delimiter: c,
+            tag: tag.to_string(),
+        });
     }
 
-    let components = components.into_iter().map(|c| {
-        let delimiter = c.delimiter;
-        let tag = tag_conversion_map.get(&normalize_str(&c.tag)).unwrap_or(&c.tag);
-        SlugComponent { delimiter, tag: tag.to_string() }
-    }).collect();
+    let components = components
+        .into_iter()
+        .map(|c| {
+            let delimiter = c.delimiter;
+            let tag = tag_conversion_map
+                .get(&normalize_str(&c.tag))
+                .unwrap_or(&c.tag);
+            SlugComponent {
+                delimiter,
+                tag: tag.to_string(),
+            }
+        })
+        .collect();
 
     (first_component, components)
 }
@@ -287,6 +339,30 @@ fn split_into_components<'a>(slug: &'a str, tag_conversion_map: &HashMap<String,
 fn normalize_str(s: impl AsRef<str>) -> String {
     // NFD normalization for interportability
     s.as_ref().nfd().collect()
+}
+
+/// Compares file sizes. Returns true if both files exist and have the same size.
+pub fn files_have_same_size(src: &Path, dst: &Path) -> io::Result<bool> {
+    let src_meta = fs::metadata(src)?;
+    let dst_meta = fs::metadata(dst)?;
+    Ok(src_meta.len() == dst_meta.len())
+}
+
+/// Compares file contents using SHA256 hash.
+/// Uses streaming to handle large files (50GB+).
+/// Assumes caller has already verified sizes match (for performance).
+pub fn files_have_same_content(src: &Path, dst: &Path) -> io::Result<bool> {
+    let src_hash = compute_sha256(src)?;
+    let dst_hash = compute_sha256(dst)?;
+    Ok(src_hash == dst_hash)
+}
+
+fn compute_sha256(path: &Path) -> io::Result<[u8; 32]> {
+    let file = fs::File::open(path)?;
+    let mut reader = io::BufReader::new(file);
+    let mut hasher = Sha256::new();
+    io::copy(&mut reader, &mut hasher)?;
+    Ok(hasher.finalize().into())
 }
 
 #[cfg(test)]
@@ -300,29 +376,71 @@ mod tests {
 
         let slug = "a.b.c..d";
         let components = split_into_components(slug, &HashMap::new());
-        assert_eq!(components, ("a", vec![
-            SlugComponent { delimiter: '.', tag: "b".to_string() },
-            SlugComponent { delimiter: '.', tag: "c".to_string() },
-            SlugComponent { delimiter: '.', tag: "".to_string() },
-            SlugComponent { delimiter: '.', tag: "d".to_string() },
-        ]));
+        assert_eq!(
+            components,
+            (
+                "a",
+                vec![
+                    SlugComponent {
+                        delimiter: '.',
+                        tag: "b".to_string()
+                    },
+                    SlugComponent {
+                        delimiter: '.',
+                        tag: "c".to_string()
+                    },
+                    SlugComponent {
+                        delimiter: '.',
+                        tag: "".to_string()
+                    },
+                    SlugComponent {
+                        delimiter: '.',
+                        tag: "d".to_string()
+                    },
+                ]
+            )
+        );
 
         let slug = ".あああ.いいい.ううう";
         let components = split_into_components(slug, &HashMap::new());
-        assert_eq!(components, (".あああ", vec![
-            SlugComponent { delimiter: '.', tag: "いいい".to_string() },
-            SlugComponent { delimiter: '.', tag: "ううう".to_string() },
-        ]));
+        assert_eq!(
+            components,
+            (
+                ".あああ",
+                vec![
+                    SlugComponent {
+                        delimiter: '.',
+                        tag: "いいい".to_string()
+                    },
+                    SlugComponent {
+                        delimiter: '.',
+                        tag: "ううう".to_string()
+                    },
+                ]
+            )
+        );
     }
 
     #[test]
     fn test_new_filename() {
         let _ = env_logger::try_init();
 
-        assert_eq!(new_filename_impl(PathBuf::from("."), None::<PathBuf>, |_| false).err().unwrap().to_string(), "Filename not found in path: .");
+        assert_eq!(
+            new_filename_impl(PathBuf::from("."), None::<PathBuf>, |_| false)
+                .err()
+                .unwrap()
+                .to_string(),
+            "Filename not found in path: ."
+        );
 
-        assert_eq!(new_filename_impl(PathBuf::from("a.b.c.txt"), None::<PathBuf>, |_| false).unwrap(), "a.b.c.txt");
-        assert_eq!(new_filename_impl(PathBuf::from("a.b.c.txt"), Some(Path::new(".")), |_| false).unwrap(), "a.b.c.txt");
+        assert_eq!(
+            new_filename_impl(PathBuf::from("a.b.c.txt"), None::<PathBuf>, |_| false).unwrap(),
+            "a.b.c.txt"
+        );
+        assert_eq!(
+            new_filename_impl(PathBuf::from("a.b.c.txt"), Some(Path::new(".")), |_| false).unwrap(),
+            "a.b.c.txt"
+        );
 
         assert_eq!(new_filename_impl(PathBuf::from("一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十"), None::<PathBuf>, |p| {
             log::trace!("Check file existence: {:?}", p);
@@ -331,18 +449,26 @@ mod tests {
                 None => false
             }
         }).unwrap(), "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四.1");
-        assert_eq!(new_filename_impl(PathBuf::from("a.b.c.txt"), Some(Path::new(".")), |p| {
-            match p.file_name().unwrap().to_str() {
-                Some(p) => p == "a.b.c.txt",
-                None => false
-            }
-        }).unwrap(), "a.b.c.1.txt");
-        assert_eq!(new_filename_impl(PathBuf::from("a.b.c.txt"), Some(Path::new(".")), |p| {
-            match p.file_name().unwrap().to_str() {
-                Some(p) => p == "a.b.c.txt" || p == "a.b.c.1.txt",
-                None => false,
-            }
-        }).unwrap(), "a.b.c.2.txt");
+        assert_eq!(
+            new_filename_impl(PathBuf::from("a.b.c.txt"), Some(Path::new(".")), |p| {
+                match p.file_name().unwrap().to_str() {
+                    Some(p) => p == "a.b.c.txt",
+                    None => false,
+                }
+            })
+            .unwrap(),
+            "a.b.c.1.txt"
+        );
+        assert_eq!(
+            new_filename_impl(PathBuf::from("a.b.c.txt"), Some(Path::new(".")), |p| {
+                match p.file_name().unwrap().to_str() {
+                    Some(p) => p == "a.b.c.txt" || p == "a.b.c.1.txt",
+                    None => false,
+                }
+            })
+            .unwrap(),
+            "a.b.c.2.txt"
+        );
     }
 
     #[test]
@@ -351,14 +477,64 @@ mod tests {
 
         let ignored_tags = HashSet::new();
         let tag_conversion_map = HashMap::new();
-        assert_eq!(new_candidate_filename("a.b.c..d", &ignored_tags, &tag_conversion_map, 0), "a.b.c..d");
-        assert_eq!(new_candidate_filename("a.b.c..d", &ignored_tags, &tag_conversion_map, 1), "a.b.c..1.d");
+        assert_eq!(
+            new_candidate_filename("a.b.c..d", &ignored_tags, &tag_conversion_map, 0),
+            "a.b.c..d"
+        );
+        assert_eq!(
+            new_candidate_filename("a.b.c..d", &ignored_tags, &tag_conversion_map, 1),
+            "a.b.c..1.d"
+        );
         assert_eq!(new_candidate_filename("一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五", &ignored_tags, &tag_conversion_map, 0), "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五");
         assert_eq!(new_candidate_filename(".一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五", &ignored_tags, &tag_conversion_map, 0), ".一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四");
         assert_eq!(new_candidate_filename("一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十", &ignored_tags, &tag_conversion_map, 0), "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五");
         assert_eq!(new_candidate_filename("一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五", &ignored_tags, &tag_conversion_map, 1), "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四.1");
         assert_eq!(new_candidate_filename(".一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五", &ignored_tags, &tag_conversion_map, 11), ".一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三.11");
     }
+
+    #[test]
+    fn test_files_have_same_size() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let file1 = dir.path().join("file1.txt");
+        let file2 = dir.path().join("file2.txt");
+        let file3 = dir.path().join("file3.txt");
+
+        fs::write(&file1, "hello").unwrap();
+        fs::write(&file2, "hello").unwrap();
+        fs::write(&file3, "hi").unwrap();
+
+        assert!(files_have_same_size(&file1, &file2).unwrap());
+        assert!(!files_have_same_size(&file1, &file3).unwrap());
+    }
+
+    #[test]
+    fn test_files_have_same_content() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let file1 = dir.path().join("file1.txt");
+        let file2 = dir.path().join("file2.txt");
+        let file3 = dir.path().join("file3.txt");
+
+        fs::write(&file1, "hello").unwrap();
+        fs::write(&file2, "hello").unwrap();
+        fs::write(&file3, "world").unwrap(); // same size, different content
+
+        assert!(files_have_same_content(&file1, &file2).unwrap());
+        assert!(!files_have_same_content(&file1, &file3).unwrap());
+    }
+
+    #[test]
+    fn test_compute_sha256() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.txt");
+        fs::write(&file, "hello").unwrap();
+
+        let hash = compute_sha256(&file).unwrap();
+        // SHA256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+        assert_eq!(
+            hex::encode(hash),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
 }
-
-

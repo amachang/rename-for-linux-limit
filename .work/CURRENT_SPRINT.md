@@ -179,6 +179,17 @@ Add `sha2` crate for SHA256 hashing. Implement size-first comparison (fast path)
 - Identical files are detected and marked for skip
 - Different-content same-name files are detected as conflicts
 
+**Status**: ✅ Complete
+
+#### Phase 2 Completion Notes
+
+- **Implemented**: `files_have_same_size()`, `files_have_same_content()`, `compute_sha256()` in lib.rs; `determine_file_status()` in bin
+- **Key pattern**: Size-first comparison (fast path) avoids expensive SHA256 for different-sized files
+- **Streaming hash**: Uses `BufReader + io::copy` pattern for memory efficiency (handles 50GB+ files per TRIGGER constraint)
+- **Status labels**: `[new]`, `[duplicate]`, `[conflict (size)]`, `[conflict (content)]`, `[error]`
+- **Dependencies added**: `sha2 = "0.10"` (runtime), `tempfile = "3"` and `hex = "0.4"` (dev)
+- **For Phase 3**: Map status to action - new: move, duplicate: delete src only, conflict: apply suffix then move
+
 ---
 
 ### Phase 3: Move + Filename Shortening
