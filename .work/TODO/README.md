@@ -48,8 +48,8 @@
 
 ## STEPs
 
-- [ ] STEP 1: Expose shortening logic + resolve action
-- [ ] STEP 2: Execute actions
+- [x] STEP 1: Expose shortening logic + resolve action
+- [x] STEP 2: Execute actions
 
 ## Action Design
 
