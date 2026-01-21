@@ -1,8 +1,10 @@
 use std::{path::{Path, PathBuf}, fs, collections::{HashSet, HashMap}};
+use std::io;
 use clap::crate_name;
 use anyhow::Result;
 use serde::{Serialize, Deserialize};
 use unicode_normalization::UnicodeNormalization;
+use sha2::{Sha256, Digest};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Config {
@@ -289,6 +291,30 @@ fn normalize_str(s: impl AsRef<str>) -> String {
     s.as_ref().nfd().collect()
 }
 
+/// Compares file sizes. Returns true if both files exist and have the same size.
+pub fn files_have_same_size(src: &Path, dst: &Path) -> io::Result<bool> {
+    let src_meta = fs::metadata(src)?;
+    let dst_meta = fs::metadata(dst)?;
+    Ok(src_meta.len() == dst_meta.len())
+}
+
+/// Compares file contents using SHA256 hash.
+/// Uses streaming to handle large files (50GB+).
+/// Assumes caller has already verified sizes match (for performance).
+pub fn files_have_same_content(src: &Path, dst: &Path) -> io::Result<bool> {
+    let src_hash = compute_sha256(src)?;
+    let dst_hash = compute_sha256(dst)?;
+    Ok(src_hash == dst_hash)
+}
+
+fn compute_sha256(path: &Path) -> io::Result<[u8; 32]> {
+    let file = fs::File::open(path)?;
+    let mut reader = io::BufReader::new(file);
+    let mut hasher = Sha256::new();
+    io::copy(&mut reader, &mut hasher)?;
+    Ok(hasher.finalize().into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,6 +384,52 @@ mod tests {
         assert_eq!(new_candidate_filename("一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十", &ignored_tags, &tag_conversion_map, 0), "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五");
         assert_eq!(new_candidate_filename("一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五", &ignored_tags, &tag_conversion_map, 1), "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四.1");
         assert_eq!(new_candidate_filename(".一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五", &ignored_tags, &tag_conversion_map, 11), ".一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三.11");
+    }
+
+    #[test]
+    fn test_files_have_same_size() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let file1 = dir.path().join("file1.txt");
+        let file2 = dir.path().join("file2.txt");
+        let file3 = dir.path().join("file3.txt");
+
+        fs::write(&file1, "hello").unwrap();
+        fs::write(&file2, "hello").unwrap();
+        fs::write(&file3, "hi").unwrap();
+
+        assert!(files_have_same_size(&file1, &file2).unwrap());
+        assert!(!files_have_same_size(&file1, &file3).unwrap());
+    }
+
+    #[test]
+    fn test_files_have_same_content() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let file1 = dir.path().join("file1.txt");
+        let file2 = dir.path().join("file2.txt");
+        let file3 = dir.path().join("file3.txt");
+
+        fs::write(&file1, "hello").unwrap();
+        fs::write(&file2, "hello").unwrap();
+        fs::write(&file3, "world").unwrap();  // same size, different content
+
+        assert!(files_have_same_content(&file1, &file2).unwrap());
+        assert!(!files_have_same_content(&file1, &file3).unwrap());
+    }
+
+    #[test]
+    fn test_compute_sha256() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.txt");
+        fs::write(&file, "hello").unwrap();
+
+        let hash = compute_sha256(&file).unwrap();
+        // SHA256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+        assert_eq!(
+            hex::encode(hash),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
     }
 }
 
