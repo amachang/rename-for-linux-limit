@@ -59,6 +59,9 @@ const WINDOWS_JUNK: &[&str] = &[
 /// Linux junk files (exact match)
 const LINUX_JUNK: &[&str] = &["lost+found"];
 
+/// Linux junk prefix (trash directories with UID suffix)
+const LINUX_JUNK_PREFIX: &str = ".Trash-";
+
 /// Checks if any component of the path matches known junk file patterns.
 ///
 /// Checks all path components, not just the filename, to catch files
@@ -89,6 +92,11 @@ pub fn is_junk_path(path: &Path) -> bool {
 
         // Linux: exact match
         if LINUX_JUNK.contains(&name.as_ref()) {
+            return true;
+        }
+
+        // Linux: prefix match for trash directories (.Trash-1000, etc.)
+        if name.starts_with(LINUX_JUNK_PREFIX) {
             return true;
         }
     }
@@ -837,6 +845,10 @@ mod tests {
     fn test_linux_junk() {
         assert!(is_junk_path(Path::new("lost+found")));
         assert!(is_junk_path(Path::new("lost+found/recovered_file")));
+        // Trash directories with UID suffix
+        assert!(is_junk_path(Path::new(".Trash-1000")));
+        assert!(is_junk_path(Path::new(".Trash-0")));
+        assert!(is_junk_path(Path::new(".Trash-1000/files/deleted.txt")));
     }
 
     #[test]

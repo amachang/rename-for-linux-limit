@@ -1,7 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
-use rename_for_linux_limit::{execute_action, resolve_action, Action};
+use rename_for_linux_limit::{execute_action, is_junk_path, resolve_action, Action};
 use std::path::PathBuf;
+use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
 #[command(name = "merge-dirs-for-linux-limit")]
@@ -69,18 +70,37 @@ fn main() -> Result<()> {
     // Track statistics
     let mut stats = Stats::default();
 
-    // Traverse source directory and execute operations
-    jdt::walk_dir(&src, |file_path| {
+    // Traverse source directory, skipping junk directories entirely
+    let walker = WalkDir::new(&src).into_iter().filter_entry(|entry| {
+        // Get path relative to src for junk check
+        let rel_path = entry.path().strip_prefix(&src).unwrap_or(entry.path());
+        !is_junk_path(rel_path)
+    });
+
+    for entry in walker {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                log::warn!("Ignoring error: {}", e);
+                continue;
+            }
+        };
+
+        let file_path = entry.path();
+
+        // Skip directories (we only process files)
+        if file_path.is_dir() {
+            continue;
+        }
+
         // Compute relative path from source root
-        let rel_path = file_path
-            .strip_prefix(&src)
-            .expect("file must be under src");
+        let rel_path = file_path.strip_prefix(&src).expect("file must be under src");
 
         // Resolve what action to take
-        let action = resolve_action(&file_path, &dst, rel_path);
+        let action = resolve_action(file_path, &dst, rel_path);
 
         // Execute the action and update stats based on outcome
-        match execute_action(&action, &file_path, args.dry_run) {
+        match execute_action(&action, file_path, args.dry_run) {
             Ok(()) => match &action {
                 Action::Move { .. } => stats.moved += 1,
                 Action::DeleteSrcOnly { .. } => stats.duplicates += 1,
@@ -88,15 +108,11 @@ fn main() -> Result<()> {
                 Action::Error { .. } => stats.errors += 1,
             },
             Err(e) => {
-                log::error!(
-                    "Failed to execute action for {}: {}",
-                    file_path.display(),
-                    e
-                );
+                log::error!("Failed to execute action for {}: {}", file_path.display(), e);
                 stats.errors += 1;
             }
         }
-    });
+    }
 
     // Print summary
     print_summary(&stats, args.dry_run);
